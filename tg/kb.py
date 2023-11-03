@@ -15,3 +15,10 @@ buy_ltc = [
     [InlineKeyboardButton(text="Отмена", callback_data="cancel_purchase")]
 ]
 buy_ltc = InlineKeyboardMarkup(inline_keyboard=buy_ltc)
+
+buy_btc = [
+    [InlineKeyboardButton(text="Купить", callback_data="confirm_purchase_btc")],
+    [InlineKeyboardButton(text="Отмена", callback_data="cancel_purchase")]
+]
+
+buy_btc = InlineKeyboardMarkup(inline_keyboard=buy_btc)
