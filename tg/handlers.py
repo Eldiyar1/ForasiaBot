@@ -78,8 +78,9 @@ async def handle_callback_query(callback_query: types.CallbackQuery, state: FSMC
 
 async def handle_crypto_purchase(callback_query, state, crypto_symbol):
     crypto_price = get_crypto_price(crypto_symbol)
+    crypto_price = round(crypto_price)
     await callback_query.message.answer(
-        f"Текущая стоимость {crypto_symbol.upper()} составляет {crypto_price} KGS. Введите количество {crypto_symbol.upper()}, которое вы хотите купить:")
+        f"Текущая стоимость {crypto_symbol.upper()} составляет {crypto_price} KGS.\nВведите количество {crypto_symbol.upper()}, которое вы хотите купить:")
     await state.update_data(crypto_symbol=crypto_symbol)
     await state.set_state(BuyCryptoStates.awaiting_crypto_amount)
 
@@ -87,14 +88,16 @@ async def handle_crypto_purchase(callback_query, state, crypto_symbol):
 @router.message()
 async def process_crypto_amount(msg: Message, state: FSMContext):
     data = await state.get_data()
-    crypto_symbol = data['crypto_symbol']
+    crypto_symbol = data.get('crypto_symbol')
 
     try:
         crypto_amount = float(msg.text)
         crypto_price = get_crypto_price(crypto_symbol)
         total_cost = crypto_amount * crypto_price
-        await msg.answer(
-            f"{crypto_amount} {crypto_symbol.upper()} будет стоить {total_cost} KGS. Желаете подтвердить покупку?",
-            reply_markup=kb.buy_btc if crypto_symbol == "btc" else kb.buy_ltc)
+        commission = 100
+        total_cost_with_commission = round(total_cost + commission)
+        await msg.answer(f"{crypto_amount} {crypto_symbol.upper()} будет стоить {total_cost_with_commission} KGS\n(включая комиссию в размере {commission} KGS).\nЖелаете подтвердить покупку?",
+                        reply_markup=kb.buy_btc if crypto_symbol == "btc" else kb.buy_ltc)
     except ValueError:
         await msg.answer("Пожалуйста, введите корректное количество криптовалюты (число).")
+
