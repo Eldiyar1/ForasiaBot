@@ -11,23 +11,15 @@ exit_kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="◀️ Выйти 
 iexit_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Выйти в меню", callback_data="menu")]])
 
 
-buy_ltc = [
-    [InlineKeyboardButton(text="Купить", callback_data="confirm_purchase_ltc")],
+buy_crypto = [
+    [InlineKeyboardButton(text="Купить", callback_data="confirm_purchase_crypto")],
     [InlineKeyboardButton(text="Отмена", callback_data="cancel_purchase")]
 ]
-buy_ltc = InlineKeyboardMarkup(inline_keyboard=buy_ltc)
-
-
-buy_btc = [
-    [InlineKeyboardButton(text="Купить", callback_data="confirm_purchase_btc")],
-    [InlineKeyboardButton(text="Отмена", callback_data="cancel_purchase")]
-]
-
-buy_btc = InlineKeyboardMarkup(inline_keyboard=buy_btc)
+buy_crypto = InlineKeyboardMarkup(inline_keyboard=buy_crypto)
 
 
 order = [
     [InlineKeyboardButton(text="Взять", callback_data="take_order")],
-      [InlineKeyboardButton(text="Оставить", callback_data="leave_order")]
+    [InlineKeyboardButton(text="Оставить", callback_data="leave_order")]
 ]
 order = InlineKeyboardMarkup(inline_keyboard=order)

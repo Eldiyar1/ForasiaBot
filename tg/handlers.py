@@ -60,7 +60,7 @@ async def handle_callback_query(callback_query: types.CallbackQuery, state: FSMC
         await state.update_data(crypto_symbol=crypto_symbol)
         await state.set_state(BuyCryptoStates.awaiting_crypto_amount)
 
-    elif callback_query.data == "confirm_purchase_ltc":
+    elif callback_query.data == "confirm_purchase_crypto":
         await callback_query.message.answer(f"Отправьте на счёт YOURADMIN OPTIMA: 43255346346345\n"
                                             f"Время ожидания 30 МИНУТ")
     elif callback_query.data == "cancel_purchase":
@@ -156,7 +156,7 @@ async def process_crypto_amount(msg: Message, state: FSMContext):
         await msg.answer(
             f"{crypto_amount} {crypto_symbol.upper()} будет стоить {total_cost_with_commission}"
             f" USDT\n(включая комиссию в размере {commission} USDT).\nЖелаете подтвердить покупку?",
-            reply_markup=kb.buy_btc if crypto_symbol == "btc" else kb.buy_ltc)
+            reply_markup=kb.buy_crypto if crypto_symbol == "btc" else kb.buy_crypto)
     except ValueError:
         await msg.answer("Пожалуйста, введите корректное количество криптовалюты (число).")
 
