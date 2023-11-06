@@ -7,11 +7,10 @@ from aiogram.types import Message
 from asgiref.sync import sync_to_async
 from decouple import config
 
-from .models import TelegramUser
+from .models import TelegramUser, Order
 from . import kb, text, chat
 from .utils import get_crypto_price
 
-bot = Bot(token=config('BOT_TOKEN'), parse_mode=ParseMode.HTML)
 router = Router()
 
 
@@ -44,92 +43,122 @@ class SendTextState(StatesGroup):
     awaiting_text = State()
 
 
-class UserStates(StatesGroup):
-    chatting_with_operator = State()
-
-
-class OperatorStates(StatesGroup):
-    chatting = State()
-    operator_chatting = State()
-
-
-a = {}
+class Chat(StatesGroup):
+    user = State()
+    operator = State()
 
 
 @router.callback_query()
-async def handle_callback_query(callback_query: types.CallbackQuery, state: FSMContext):
+async def handle_callback_query(callback_query: types.CallbackQuery, state: FSMContext, bot: Bot):
     if callback_query.data in ["buy_ltc", "buy_btc"]:
-        await handle_crypto_purchase(callback_query, state, callback_query.data[4:])
-    elif callback_query.data == "confirm_purchase":
-        await callback_query.message.answer(f"Отправьте на счёт YOURADMIN OPTIMA: 43255346346345"
+        crypto_symbol = callback_query.data[4:]
+        crypto_price = await sync_to_async(get_crypto_price)(crypto_symbol)
+        crypto_price = round(crypto_price, 2)
+        await callback_query.message.answer(
+            f"Текущая стоимость {crypto_symbol.upper()} составляет {crypto_price} USDT.\nВведите количество "
+            f"{crypto_symbol.upper()}, которое вы хотите купить:", reply_markup=kb.iexit_kb)
+        await state.update_data(crypto_symbol=crypto_symbol)
+        await state.set_state(BuyCryptoStates.awaiting_crypto_amount)
+
+    elif callback_query.data == "confirm_purchase_ltc":
+        await callback_query.message.answer(f"Отправьте на счёт YOURADMIN OPTIMA: 43255346346345\n"
                                             f"Время ожидания 30 МИНУТ")
     elif callback_query.data == "cancel_purchase":
         await callback_query.message.answer("Меню", reply_markup=kb.menu)
-        await state.set_state(None)  # Сбросит состояние после кн-ки отмены
-    elif callback_query.data == "exit":
+        await state.set_state(None)
+    if callback_query.data == "menu":
         await callback_query.message.edit_text(text.greet.format(name=callback_query.from_user.full_name),
                                                reply_markup=kb.menu)
-        await state.set_state(None)  # Сбросит состояние после кн-ки отмены
-    elif callback_query.data == "operator":
-        operator = 5465640772  # Оператор
-        a[operator] = callback_query.from_user.id
-        await state.set_state(OperatorStates.chatting)  # Установите состояние "chatting"
-        await callback_query.message.answer("Вы связались с оператором. Начните писать вопросы или сообщения.")
+    if callback_query.data == "operator":
+        await state.set_state(Chat.user)
+        user, created = await sync_to_async(TelegramUser.objects.get_or_create)(user_id=callback_query.from_user.id)
+        order, _ = await sync_to_async(Order.objects.get_or_create)(user=user, is_active=True)
+        operators = await sync_to_async(TelegramUser.objects.filter)(is_admin=True, is_active=True)
+
+        await callback_query.message.answer("Вы связались с оператором. Начните писать вопросы или сообщения.",
+                                            reply_markup=kb.exit_kb)
+        for operator in operators:
+            await bot.send_message(operator.user_id, f"Клиент {callback_query.from_user.username} пишет!\n"
+                                                     f"Примите запрос, прежде чем ответить!",
+                                   reply_markup=kb.order)
+
+    elif callback_query.data == "take_order":
+        orders = await sync_to_async(Order.objects.filter)(is_active=True, operator=None)
+        order = orders.first()
+        operator = await sync_to_async(TelegramUser.objects.get)(user_id=callback_query.from_user.id)
+        # print("ORDER OPERATOR TAKE ORDER", order.operator)
+        if order and order.operator is None:
+            order.operator = operator
+            order.save()
+            operator.is_active = False
+            operator.save()
+            await state.set_state(Chat.operator)
+            await callback_query.message.edit_text("Вы забрали ордер! \nМожете писать сообщение!")
+        elif order is None:
+            operator.is_active = True
+            operator.save()
+            await callback_query.message.delete()
+            await callback_query.message.answer("Ордер уже забрали")
+            await state.clear()
 
 
+@router.message(Chat.user)
+async def user_chat(msg: Message, state: FSMContext, bot: Bot):
+    user, created = await sync_to_async(TelegramUser.objects.get_or_create)(user_id=msg.from_user.id)
+    order, _ = await sync_to_async(Order.objects.get_or_create)(user=user, is_active=True)
+    operators = await sync_to_async(TelegramUser.objects.filter)(is_admin=True, is_active=True)
+    print("USER CHAT: ORDER.OPERATOR", order.operator)
+    if order.operator is None:
+        print("ВНУТРИ ИС НАН")
+        for operator in operators:
+            print("ВНУТРИ ЦИКЛА ОПЕРАТОРС")
+            await msg.forward(operator.user_id)
 
-async def handle_crypto_purchase(callback_query, state, crypto_symbol):
-    crypto_price = get_crypto_price(crypto_symbol)
-    crypto_price = round(crypto_price)
-    await callback_query.message.answer(
-        f"Текущая стоимость {crypto_symbol.upper()} составляет {crypto_price} KGS.\nВведите количество {crypto_symbol.upper()}, которое вы хотите купить:")
-    await state.update_data(crypto_symbol=crypto_symbol)
-    await state.set_state(BuyCryptoStates.awaiting_crypto_amount)
+    if order.operator:
+        await msg.forward(order.operator.user_id)
+
+    if msg.text == "EXIT":
+        order.is_active = False
+        order.operator.is_active = True
+        order.save()
+        order.operator.save()
+        await msg.answer("Вы вышли из чата")
+        await state.clear()
 
 
-@router.message()
+@router.message(Chat.operator)
+async def chat_operator(message: types.Message, state: FSMContext, bot: Bot):
+    operator = await sync_to_async(TelegramUser.objects.get)(user_id=message.from_user.id)
+    order = await sync_to_async(Order.objects.get)(operator=operator, is_active=True)
+    print("CHAT OPERATOR", operator.username, order.is_active, order.user, order.operator)
+    if order.is_active:
+        await bot.send_message(order.user.user_id, message.text, reply_markup=kb.exit_kb)
+    else:
+        order.is_active = False
+        order.save()
+        operator.is_active = True
+        operator.save()
+
+        await state.clear()
+
+
+@router.message(BuyCryptoStates.awaiting_crypto_amount)
 async def process_crypto_amount(msg: Message, state: FSMContext):
-    current_state = await state.get_state()
-    if current_state == BuyCryptoStates.awaiting_crypto_amount.state:
-        data = await state.get_data()
-        crypto_symbol = data.get('crypto_symbol')
+    data = await state.get_data()
+    crypto_symbol = data.get('crypto_symbol')
 
-        try:
-            crypto_amount = float(msg.text)
-            crypto_price = get_crypto_price(crypto_symbol)
-            total_cost = crypto_amount * crypto_price
-            commission = 100
-            total_cost_with_commission = round(total_cost + commission)
-            await msg.answer(
-                f"{crypto_amount} {crypto_symbol.upper()} будет стоить {total_cost_with_commission} KGS\n(включая комиссию в размере {commission} KGS).\nЖелаете подтвердить покупку?",
-                reply_markup=kb.buy_btc if crypto_symbol == "btc" else kb.buy_ltc)
-        except ValueError:
-            await msg.answer("Пожалуйста, введите корректное количество криптовалюты (число).")
-    else:
-        await msg.answer("Извините, я не понимаю. Пожалуйста, используйте меню для навигации.")
-
-
-
-@router.message(OperatorStates.chatting)
-async def operator_chat(message: types.Message, state: FSMContext):
-    user_id = message.from_user.id
-    operator_id = 5465640772  # Замените этим ID вашего оператора
-    if message.text == "/end_chat":
-        # Если пользователь отправил команду завершения чата
-        await state.set_state(OperatorStates.chatting)
-
-        await state.clear()  # Завершаем состояние "chatting"
-        del a[operator_id]
-        await message.answer("Чат завершен. Вернитесь в меню.", reply_markup=kb.menu)
-
-    else:
-
-        await message.forward(operator_id, kwargs=message.from_user.id)
-
-
-@router.message(F.from_user.id == 5465640772)
-async def operator(msg: Message, state: FSMContext):
-    await bot.send_message(6126380985, msg.text)
+    try:
+        crypto_amount = float(msg.text)
+        crypto_price = await sync_to_async(get_crypto_price)(crypto_symbol)
+        total_cost = crypto_amount * crypto_price
+        commission = 1
+        total_cost_with_commission = round(total_cost + commission, 2)
+        await msg.answer(
+            f"{crypto_amount} {crypto_symbol.upper()} будет стоить {total_cost_with_commission}"
+            f" USDT\n(включая комиссию в размере {commission} USDT).\nЖелаете подтвердить покупку?",
+            reply_markup=kb.buy_btc if crypto_symbol == "btc" else kb.buy_ltc)
+    except ValueError:
+        await msg.answer("Пожалуйста, введите корректное количество криптовалюты (число).")
 
 
 @router.message(Command("send"))
@@ -149,7 +178,7 @@ async def send_command(msg: Message, state: FSMContext):
 
 
 @router.message(SendTextState.awaiting_text)
-async def handle_send_all(message: types.Message, state: FSMContext):
+async def handle_send_all(message: types.Message, state: FSMContext, bot: Bot):
     text_to_send = message.text
 
     users = await sync_to_async(TelegramUser.objects.all)()
